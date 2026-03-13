@@ -16,6 +16,9 @@ use CacheTool\Code;
 
 class Web extends AbstractAdapter
 {
+    // try for 120s (the default php.ini realpath_cache_ttl setting) + 6s
+    private const maxTries = 15;
+    private const retryDelayS = 2;
     private $path;
     private $http;
 
@@ -34,7 +37,24 @@ class Web extends AbstractAdapter
         $file = $this->createWebFile($filename);
         $code->writeTo($file);
 
-        $content = $this->http->fetch($filename);
+        // Some storage setups lead to created files not immediately being accessible via HTTP.
+        // Try fetching up to self::maxTries times in self::retryDelay seconds intervals:
+        for ($i = 0; $i < self::maxTries; $i++) {
+            $content = $this->http->fetch($filename);
+            $result = @unserialize($content);
+            if (($result['result'] ?? false) !== false) {
+                break;
+            }
+            // echo the erroring result to stderr
+            fwrite(
+                STDERR,
+                printf(
+                    '%s\n',
+                    json_encode($result)
+                )
+            );
+            sleep(self::retryDelayS);
+        }
 
         if (!@unlink($file)) {
             $this->logger->debug(sprintf('Web: Could not delete file: %s', $file));
